@@ -4,6 +4,7 @@
  * 来源与边界：参考 nexu-io/open-design 0.21.0 的 runtime registry / detection，
  * 但这里只收下本工作台当前能安全证明的最小能力：Claude Code、CodeBuddy 与 Codex CLI 的订阅登录。
  * 三家都用用户自己在本机完成的登录；产品不代管登录、不复制登录凭据。
+ * 唯一的例外要部署者显式开启：Claude Code 网关模式（VRA_CLAUDE_GATEWAY=1，见 claudeGatewayEnv），卡片如实标成网关、不冒充订阅。
  * 普通 Agent 对话与 Deep 研究使用各自的产品 MCP；连接探针等内部任务不挂载工具。
  * 所有路径都关闭会话落盘与用户配置；没有等价隔离参数的 CLI 不能把按钮点亮。
  */
@@ -40,6 +41,8 @@ export interface LocalAgentStatus {
   custom_path?: boolean;
   /** 设置页存着一个手动指定的位置 —— 不管现在还找不找得到;页面据此给出「恢复自动检测」(环境变量锁定时为 false) */
   saved_path?: boolean;
+  /** Claude Code 网关模式(部署者设了 VRA_CLAUDE_GATEWAY=1):走启动环境里的网关配置,不是 claude.ai 订阅;页面据此如实标注 */
+  mode?: "gateway";
 }
 
 /** Windows 没有 POSIX 进程组；taskkill /T 是对应的整棵进程树终止语义。 */
@@ -663,6 +666,15 @@ export async function probeClaude(env: NodeJS.ProcessEnv = process.env): Promise
     return {
       provider: "cli-claude", name: "Claude Code", installed: true, authenticated: false,
       available: false, version: null, status: "probe_failed", detail: "Claude Code 已安装，但版本检测失败",
+    };
+  }
+  if (claudeGatewayEnabled(env)) {
+    // 网关模式:卡片如实标成网关,不再承诺 claude.ai 订阅,所以不查登录方式;网关到底能不能用由「测试并保存」的真实对话说了算
+    const missing = claudeGatewayMissing(env);
+    return {
+      provider: "cli-claude", name: "Claude Code", installed: true, authenticated: missing.length === 0, available: missing.length === 0,
+      version, status: missing.length === 0 ? "ready" : "not_authenticated", mode: "gateway",
+      detail: missing.length === 0 ? "已安装；网关模式：走启动环境里的网关配置，不是 claude.ai 订阅" : claudeGatewayMissingHint(env),
     };
   }
   let authenticated: boolean;
@@ -1411,8 +1423,50 @@ export function codeBuddyArgs(systemPrompt: string, outputSchema?: unknown, lega
   return args;
 }
 
+/** Claude Code 网关模式的开关:部署者显式设 `VRA_CLAUDE_GATEWAY=1` 才生效,缺省仍是只认 claude.ai 订阅登录 */
+const CLAUDE_GATEWAY_FLAG = "VRA_CLAUDE_GATEWAY";
+export function claudeGatewayEnabled(env: NodeJS.ProcessEnv): boolean {
+  return String(env[CLAUDE_GATEWAY_FLAG] ?? "").trim() === "1";
+}
+
+/**
+ * 网关模式交给 Claude Code 的变量:启动服务的环境里全部 `ANTHROPIC_*`(网关地址、凭据、模型名)加 API 超时,原样转交。
+ * 🔴 产品不读 CLI 的配置文件、不代填凭据:使用者自己把 Claude Code 的网关配置导出给启动环境,产品只是转交。
+ * 🔴 研究走的工具路径关了 setting sources(`--setting-sources ""`),CLI 不会自己去读用户配置,必须由这里显式带;
+ *    对话路径(`--safe-mode`)虽然还读用户配置,两条路给同一份变量,免得对话能用、研究连不上。
+ */
+export function claudeGatewayEnv(base: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue;
+    const name = process.platform === "win32" ? key.toUpperCase() : key;
+    if (name.startsWith("ANTHROPIC_") || name === "API_TIMEOUT_MS") out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * 网关模式还缺什么:网关地址必给,凭据 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` 至少一个。空数组 = 齐了
+ * (CLAUDE_CODE_OAUTH_TOKEN 本来就在订阅白名单里,拿它接网关的配置同样算有凭据)
+ */
+function claudeGatewayMissing(env: NodeJS.ProcessEnv): string[] {
+  const name = (key: string) => process.platform === "win32" ? key.toUpperCase() : key;
+  const filled = (vars: Record<string, string | undefined>, want: string) =>
+    Object.entries(vars).some(([key, value]) => name(key) === want && String(value ?? "").trim() !== "");
+  const gateway = claudeGatewayEnv(env);
+  const missing: string[] = [];
+  if (!filled(gateway, "ANTHROPIC_BASE_URL")) missing.push("ANTHROPIC_BASE_URL");
+  if (!filled(gateway, "ANTHROPIC_AUTH_TOKEN") && !filled(gateway, "ANTHROPIC_API_KEY") && !filled(env, "CLAUDE_CODE_OAUTH_TOKEN")) missing.push("ANTHROPIC_AUTH_TOKEN");
+  return missing;
+}
+
+const claudeGatewayMissingHint = (env: NodeJS.ProcessEnv): string =>
+  `Claude Code 网关模式已开启，但启动服务的环境里缺少 ${claudeGatewayMissing(env).join(" / ")}：` +
+  "请在启动前导出 Claude Code 的网关地址与凭据（与 claude 自己的配置一致），或去掉 VRA_CLAUDE_GATEWAY 回到只认订阅登录";
+
 function subscriptionEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = localSubscriptionEnv(base, "claude");
+  if (claudeGatewayEnabled(base)) return { ...env, ...claudeGatewayEnv(base) };
   // 用户明确选择“Claude 订阅”时，让 Claude Code 自己的 claude.ai 登录态胜出。
   // 否则外壳进程里遗留的 API key / 第三方网关可能静默改掉计费方。
   // `CLAUDE_CODE_OAUTH_TOKEN` 是 `claude setup-token` 生成的官方订阅认证，必须保留；
@@ -1532,24 +1586,28 @@ export async function runLocalAgent(
     }
   }
   if (agent === "claude") {
-    // 每次执行前都确认能力参数还在、且仍是 claude.ai 订阅登录。环境变量清理只挡得住外壳里的 API key，
+    const gateway = claudeGatewayEnabled(baseEnv);
+    // 每次执行前都确认能力参数还在;默认模式下还要确认仍是 claude.ai 订阅登录。环境变量清理只挡得住外壳里的 API key，
     // 挡不住 CLI 自己保存的 API key / Bedrock 登录：用户在两次调用之间换了登录方式，同一张“订阅”卡片就会静默改成按量计费。
-    let subscribed: boolean;
+    // 网关模式不承诺订阅、卡片如实标成网关,计费方由使用者自己导出的配置决定:不查登录方式,只核对网关变量还在。
+    let loginOk: boolean;
     try {
       const claudeEnv = subscriptionEnv(baseEnv);
       if (!(await claudeHasRequiredFlags(bin, claudeEnv, CLAUDE_RUN_PROBE_TIMEOUT_MS, opts.signal))) {
         throw new LocalAgentError("agent_cli_too_old", "Claude Code 版本过旧，缺少受限对话所需的安全参数");
       }
-      subscribed = await claudeSubscriptionLogin(bin, claudeEnv, CLAUDE_RUN_PROBE_TIMEOUT_MS, opts.signal);
+      loginOk = gateway ? claudeGatewayMissing(baseEnv).length === 0
+        : await claudeSubscriptionLogin(bin, claudeEnv, CLAUDE_RUN_PROBE_TIMEOUT_MS, opts.signal);
     } catch (error) {
       releaseSlot();
       if (opts.signal?.aborted) throw cancelled();
       if (error instanceof LocalAgentError) throw error;
       throw new LocalAgentError("agent_probe_failed", "Claude Code 版本或登录状态检测未完成，请重试；现有登录不会被清除。");
     }
-    if (!subscribed) {
+    if (!loginOk) {
       releaseSlot();
-      throw new LocalAgentError("agent_not_authenticated", "Claude Code 当前不是 claude.ai 订阅登录；请先运行 claude 并用订阅账号完成 /login");
+      throw new LocalAgentError("agent_not_authenticated", gateway ? claudeGatewayMissingHint(baseEnv)
+        : "Claude Code 当前不是 claude.ai 订阅登录；请先运行 claude 并用订阅账号完成 /login");
     }
   }
   if (agent === "codex") {

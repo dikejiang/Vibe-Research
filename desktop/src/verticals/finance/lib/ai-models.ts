@@ -87,6 +87,21 @@ export const AI_MODELS: ModelConfig[] = [
 export const SUBSCRIPTION_MODELS = AI_MODELS.filter((m) => isCliProvider(m.provider));
 export const API_MODELS = AI_MODELS.filter((m) => !isCliProvider(m.provider));
 
+/** 后端探针给的本机 Agent 模式:目前只有 Claude Code 有网关模式(服务带着 VRA_CLAUDE_GATEWAY=1 启动) */
+export const isGatewayAgent = (status: { mode?: "gateway" } | undefined): boolean => status?.mode === "gateway";
+
+/**
+ * Claude Code 网关模式下的说法,界面各处共用:它走的是启动环境里的网关配置,不是 claude.ai 订阅。
+ * 🔴 不拿「订阅」字样冒充:卡片、首次接入弹窗、运行时说明都从这里取文案。
+ */
+export const CLAUDE_GATEWAY = {
+  label: "Claude Code（网关）",
+  description: "用本机 Claude Code，走启动环境里的网关配置（不是订阅）",
+  note: "Claude Code 当前是网关模式：服务带着 VRA_CLAUDE_GATEWAY=1 启动，请求走启动环境里的 Anthropic 网关配置（启动前由你导出），不是 claude.ai 订阅，额度算谁的由那份配置决定。本产品只把变量转交给 claude 程序，不读取也不保存凭据。",
+  runtime: "使用 Claude Code（网关模式，非订阅）",
+  hint: "Claude Code 网关模式已开启，但启动服务的环境里缺少网关地址或凭据。请先停掉服务，启动前导出 Claude Code 的网关配置（ANTHROPIC_BASE_URL 与 ANTHROPIC_AUTH_TOKEN），再启动并重新检测。",
+} as const;
+
 /** A selectable preset is not the user's editable model name. Preserve provider identity on remount. */
 export function apiPresetForSaved(saved: { provider: string; model: string } | null): string {
   if (!saved || isCliProvider(saved.provider)) return API_MODELS[0]!.id;

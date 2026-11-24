@@ -573,6 +573,22 @@ test("service:研究子进程带上所选订阅 Agent 的 CLI 位置(*_BIN),不�
   assert.equal(researchRuntimeEnv(ctx, { provider: "cli-codex" }, { ...base, CODEX_BIN: "  " }).CODEX_BIN, undefined, "空白值不算设置");
 });
 
+test("service:Claude 网关模式把启动环境里的网关变量交给研究子进程;没开启时一个都不带,别家大脑也不沾", () => {
+  const ctx = fakeCtx();
+  const base = { PATH: "/bin", HOME: "/h", CLAUDE_BIN: "/opt/c/claude", CODEX_BIN: "/opt/x/codex", OPENAI_API_KEY: "sk-leak",
+    ANTHROPIC_BASE_URL: "https://gateway.invalid/anthropic", ANTHROPIC_AUTH_TOKEN: "gateway-token-marker", ANTHROPIC_MODEL: "glm-x", API_TIMEOUT_MS: "300000" };
+  const off = researchRuntimeEnv(ctx, { provider: "cli-claude" }, base);
+  for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "API_TIMEOUT_MS"]) assert.equal(off[key], undefined, `没开启网关模式时不带 ${key}`);
+  const on = researchRuntimeEnv(ctx, { provider: "cli-claude" }, { ...base, VRA_CLAUDE_GATEWAY: "1" });
+  assert.equal(on.ANTHROPIC_BASE_URL, base.ANTHROPIC_BASE_URL, "研究走工具路径时不读用户配置:网关变量必须由这里带给子进程");
+  assert.equal(on.ANTHROPIC_AUTH_TOKEN, base.ANTHROPIC_AUTH_TOKEN);
+  assert.equal(on.ANTHROPIC_MODEL, base.ANTHROPIC_MODEL);
+  assert.equal(on.API_TIMEOUT_MS, base.API_TIMEOUT_MS);
+  assert.equal(on.OPENAI_API_KEY, undefined);
+  assert.equal(researchRuntimeEnv(ctx, { provider: "cli-codex" }, { ...base, VRA_CLAUDE_GATEWAY: "1" }).ANTHROPIC_AUTH_TOKEN, undefined, "网关变量只交给 Claude");
+  assert.equal(researchEnv({ PATH: "/bin", VRA_CLAUDE_GATEWAY: "1" }).VRA_CLAUDE_GATEWAY, "1", "开关随 VRA_* 交给子进程,子进程按同一个模式执行");
+});
+
 test("HTTP API:token 必需 / 非本机 Origin 403 / 跨站 403 / 非 JSON POST 415 / 路由 / 无绝对路径 / 500 脱敏", async () => {
   const ctx = fakeCtx();
   assert.throws(() => createApiServer(ctx, { token: "short" }), /16/);

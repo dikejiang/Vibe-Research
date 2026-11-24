@@ -42,7 +42,7 @@
 
 | `--provider` | 种类(`manifest.engine.kind`) | 线路 | 登录与凭据 |
 |------|------|------|------|
-| `cli-claude` | `local_agent` | 本机 `claude -p` | 使用者自己的 claude.ai 订阅登录(API key / Bedrock / Vertex 登录不算订阅;探测与每次调用前都会核对) |
+| `cli-claude` | `local_agent` | 本机 `claude -p` | 使用者自己的 claude.ai 订阅登录(API key / Bedrock / Vertex 登录不算订阅;探测与每次调用前都会核对);设 `VRA_CLAUDE_GATEWAY=1` 时为网关模式,见下 |
 | `cli-codex` | `local_agent` | 本机 `codex exec` | 使用者自己的 ChatGPT 登录(`codex login`);Codex 里配的 API key 登录不认(每次调用前核对) |
 | `cli-codebuddy` | `local_agent` | 本机 `codebuddy -p`(独立 CLI 或 WorkBuddy 桌面版内置) | 使用者自己的 WorkBuddy / CodeBuddy 登录 |
 | `providers/` 里的模板 id(如 `deepseek`) | `direct` | Chat Completions + function calling | key 只从模板声明的环境变量读(如 `DEEPSEEK_API_KEY`),不进配置文件 |
@@ -53,7 +53,10 @@
   CLI 内建工具全关(Claude / CodeBuddy:`--tools ""` + `--strict-mcp-config`;Codex:`-s read-only` + `--ignore-user-config` + 关闭 shell / 联网搜索 / 子代理等功能,
   事件流出现白名单外的条目类型就立即终止进程树)。子进程环境变量走白名单(`localSubscriptionEnv`):只带系统基础变量与各 CLI 的登录目录
   (`CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_OAUTH_TOKEN` / `CODEX_HOME`),**不带任何 API key**(`CODEX_API_KEY` / `OPENAI_API_KEY` 等被排除,
-  否则账单可能悄悄从订阅换成 key)。产品不读、不复制、不软链任何 CLI 的认证文件。
+  否则账单可能悄悄从订阅换成 key;Claude Code 网关模式是唯一例外,见下一条)。产品不读、不复制、不软链任何 CLI 的认证文件。
+- **Claude Code 网关模式**(部署者显式设 `VRA_CLAUDE_GATEWAY=1`):卡片不再要求 claude.ai 订阅登录,改为把启动环境里的全部 `ANTHROPIC_*` 与 `API_TIMEOUT_MS` 原样交给 `claude`
+  (`claudeGatewayEnv`;研究走工具路径、不读用户配置,所以 `researchRuntimeEnv` 同样把它们带给研究子进程),状态带 `mode: "gateway"`、页面如实标成网关模式。
+  产品仍不读 CLI 的配置文件、不代填凭据;缺网关地址或凭据时探针报未就绪并说明缺哪个。
 - **找 CLI 的顺序**:环境变量 `CLAUDE_BIN` / `CODEX_BIN` / `CODEBUDDY_BIN`(设了就只认它)→ 页面「接入 AI」里保存的 WorkBuddy 位置
   (`<数据根>/local-agents.json`)→ PATH 与常见目录 → 官方原生安装位置 → WorkBuddy 桌面版内置。研究子进程与页面认同一个位置。
 - **模型 API**:`engines/direct_stage_agent.ts` 在产品进程里跑工具循环;端点地址、默认模型、结构化输出方式来自模板(用户覆盖 `<数据根>/providers/<id>.json`)。

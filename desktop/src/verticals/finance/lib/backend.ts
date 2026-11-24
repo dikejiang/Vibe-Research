@@ -648,6 +648,8 @@ export interface LocalAgentStatus {
   custom_path?: boolean;
   /** 存着一个手动指定的位置(哪怕已经找不到了):据此给出「恢复自动检测」 */
   saved_path?: boolean;
+  /** Claude Code 网关模式(服务带着 VRA_CLAUDE_GATEWAY=1 启动):走启动环境里的网关配置,不是 claude.ai 订阅;页面据此如实标注 */
+  mode?: "gateway";
 }
 
 /** 一段产出里数字的着落。三档分开报 —— 混成一个数等于什么都没说 */

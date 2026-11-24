@@ -274,7 +274,7 @@ A 股最多查 30 只，持有的优先。某个来源没取到会列在「没�
 **各家怎么连接：**
 
 - **Codex**：`npm install -g @openai/codex`，在终端运行 `codex login`，用 ChatGPT 账号登录；回到「接入 AI」点「重新检测」，显示可用后点「测试并保存」。用 API key 登录的 Codex 不可用，避免订阅悄悄变成按量计费。
-- **Claude Code**：用 claude.ai 订阅登录后，设置页会自动检测；API key、Bedrock、Vertex 登录不算订阅。
+- **Claude Code**：用 claude.ai 订阅登录后，设置页会自动检测；API key、Bedrock、Vertex 登录不算订阅。让 Claude Code 走自建网关的部署者可以显式开启网关模式：启动前设 `VRA_CLAUDE_GATEWAY=1` 并导出 Claude Code 的网关配置，卡片标成「网关模式」，不再要求订阅登录（见 `docs/model-access.md`）。
 - **WorkBuddy / CodeBuddy**：运行 `npm install -g @tencent-ai/codebuddy-code` 安装腾讯官方独立命令行，再在终端运行 `codebuddy` 登录一次（跟 WorkBuddy 桌面版的登录分开），回到「接入 AI」点「重新检测」。新版 WorkBuddy 桌面版把登录加密保存、只给它自己启动的程序用，本产品借不到，卡片会显示「借不到 WorkBuddy 的登录」（之前在卡片里指定过 WorkBuddy 位置的，装好独立命令行后先点「恢复自动检测」；设了 `CODEBUDDY_BIN` 的，改掉或去掉再重启）；能借到登录的旧版桌面版仍会直接识别，Windows 上装在别的盘或自定义文件夹，也会从「已安装的程序」登记或正在运行的 WorkBuddy 里找到。仍找不到时（卡片显示「未安装」），先打开 WorkBuddy 再点「重新检测」，或在 WorkBuddy 卡片里填它的安装文件夹，或在启动前设环境变量 `CODEBUDDY_BIN`。
 - **模型 API**：「接入 AI」→「API 接入」，选供应商，填 API 地址、模型名和 key，点「测试并保存」。
 
@@ -285,7 +285,7 @@ A 股最多查 30 只，持有的优先。某个来源没取到会列在「没�
 
 - 研究的每个阶段是一次独立会话，只能调用 Vibe Research 的 5 个受控工具（列文件、读文件、确定性计算、写阶段产物、写报告），订阅 CLI 的内建工具全部关闭；收工检查由产品执行，四种 AI 来源都一样。
 - 页面上的对话、研究、辩论和回测都允许 AI 联网和调用产品工具。通过接口调用时仍可传 `executionMode: "direct"` 要一轮不调用工具的回答；这时个股研究、多空辩论和 Agent 回测会直接报错，不会悄悄降级。
-- 订阅只认对应的订阅登录（Codex 只认 ChatGPT 登录，Claude 只认 claude.ai 订阅登录）。终端里的 API key 环境变量不会带进 CLI，避免计费方被悄悄换掉。研究只开放产品受控工具；用户配置与自动记忆保持关闭。
+- 订阅只认对应的订阅登录（Codex 只认 ChatGPT 登录，Claude 只认 claude.ai 订阅登录）。终端里的 API key 环境变量不会带进 CLI，避免计费方被悄悄换掉（部署者显式设 `VRA_CLAUDE_GATEWAY=1` 的 Claude Code 网关模式除外，卡片如实标成网关模式）。研究只开放产品受控工具；用户配置与自动记忆保持关闭。
 - 例外：Codex 会读你自己的全局 `$CODEX_HOME/AGENTS.md`（没有参数能关）。产品指令优先级更高，但里面的称呼、语气等设定仍可能生效；产品不加载你的 `config.toml`。
 - WorkBuddy 自带的旧版 CLI 如果没有「禁止会话落盘」参数，整次回答会改在一次性临时目录里运行，结束后删除。
 - 订阅的每次对话都会启动对应的本机 CLI，不承诺固定响应时间。

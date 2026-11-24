@@ -4,6 +4,7 @@ import { ArrowRight, LoaderCircle, Sparkles, Terminal, X } from "lucide-react";
 import { ApiError, backend, friendlyAgentError } from "@/lib/backend";
 import { LLM_KEY, saveUserLlm } from "@/lib/llmStore";
 import { subscriptionConfig, testAndSaveAi } from "@/lib/aiConnection";
+import { CLAUDE_GATEWAY, isGatewayAgent } from "@/lib/ai-models";
 
 const OPTIONS = [
   { provider: "cli-codex", label: "Codex订阅版", detail: "使用本机 Codex CLI 的 ChatGPT 登录" },
@@ -18,11 +19,40 @@ const LOGIN_HINT: Record<string, string> = {
   "cli-codebuddy": "没有可用的 CodeBuddy 登录。新版 WorkBuddy 的登录只给它自己用，这里借不到：请安装腾讯官方独立命令行（npm install -g @tencent-ai/codebuddy-code），在终端运行 codebuddy 登录，然后再点一次（在「接入 AI」里指定过 WorkBuddy 位置的，先点「恢复自动检测」）；也可以改用 API 接入。",
 };
 
+/** 弹窗里的三个选项（只展示）。Claude Code 网关模式下如实改口：走的是启动环境里的网关配置，不拿「订阅」冒充。 */
+export function QuickAiConnectOptions({ claudeGateway, busy, disabled, onConnect }: {
+  claudeGateway: boolean; busy: string; disabled: boolean; onConnect: (provider: string) => void;
+}) {
+  return (
+    <div className="mt-6 space-y-2">
+      {OPTIONS.map(({ provider, label, detail }) => {
+        const gateway = provider === "cli-claude" && claudeGateway;
+        return (
+          <button key={provider} type="button" data-connect-provider={provider} disabled={Boolean(busy) || disabled}
+            onClick={() => onConnect(provider)} className="group flex w-full items-center gap-3 rounded-xl border border-border bg-muted/20 p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 disabled:cursor-wait disabled:opacity-60">
+            {busy === provider ? <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-primary" /> : <Terminal className="h-5 w-5 shrink-0 text-primary" />}
+            <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{gateway ? CLAUDE_GATEWAY.label : label}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{busy === provider ? "正在检测并测试连接…" : gateway ? CLAUDE_GATEWAY.description : detail}</span></span>
+            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-primary" />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function QuickAiConnect({ onDismiss, storageStatus }: { onDismiss: () => void; storageStatus: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const inFlight = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [claudeGateway, setClaudeGateway] = useState(false);
+  useEffect(() => {
+    // Claude Code 网关模式下,这一项的说法要跟着改;检测不到就照订阅的说法显示,点下去有具体提示
+    let alive = true;
+    backend.localAgents().then((agents) => { if (alive) setClaudeGateway(isGatewayAgent(agents.find((a) => a.provider === "cli-claude"))); },
+      () => { /* 检测失败:照订阅的说法显示 */ });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     const node = dialog.current;
     node?.showModal();
@@ -41,9 +71,10 @@ export function QuickAiConnect({ onDismiss, storageStatus }: { onDismiss: () => 
       onDismiss();
     } catch (e) {
       if (!controller.signal.aborted) {
-        const label = OPTIONS.find((option) => option.provider === provider)!.label;
+        const gateway = provider === "cli-claude" && claudeGateway;
+        const label = gateway ? CLAUDE_GATEWAY.label : OPTIONS.find((option) => option.provider === provider)!.label;
         const requiresLogin = e instanceof ApiError && (e.code === "agent_not_ready" || e.code === "agent_not_authenticated");
-        setError(`${label}：${requiresLogin ? LOGIN_HINT[provider] : friendlyAgentError(e)}`);
+        setError(`${label}：${requiresLogin ? (gateway ? CLAUDE_GATEWAY.hint : LOGIN_HINT[provider]) : friendlyAgentError(e)}`);
       }
     } finally {
       if (!controller.signal.aborted) { inFlight.current = null; setBusy(""); }
@@ -62,16 +93,7 @@ export function QuickAiConnect({ onDismiss, storageStatus }: { onDismiss: () => 
         <p id="quick-ai-description" className="mt-2 text-sm leading-6 text-muted-foreground">选择已有订阅，点击即可测试接入。连接成功后，直接开始研究。</p>
         {storageStatus === "broken" && <p role="alert" className="mt-3 text-xs text-destructive">原有配置无法读取，请重新接入；测试失败不会覆盖原配置。</p>}
         {storageStatus === "unavailable" && <p role="alert" className="mt-3 text-xs text-destructive">浏览器阻止了本地存储。请允许此页面保存配置后再连接。</p>}
-        <div className="mt-6 space-y-2">
-          {OPTIONS.map(({ provider, label, detail }) => (
-            <button key={provider} type="button" data-connect-provider={provider} disabled={Boolean(busy) || storageStatus === "unavailable"}
-              onClick={() => void connect(provider)} className="group flex w-full items-center gap-3 rounded-xl border border-border bg-muted/20 p-4 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 disabled:cursor-wait disabled:opacity-60">
-              {busy === provider ? <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-primary" /> : <Terminal className="h-5 w-5 shrink-0 text-primary" />}
-              <span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{label}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{busy === provider ? "正在检测并测试连接…" : detail}</span></span>
-              <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-primary" />
-            </button>
-          ))}
-        </div>
+        <QuickAiConnectOptions claudeGateway={claudeGateway} busy={busy} disabled={storageStatus === "unavailable"} onConnect={(provider) => void connect(provider)} />
         <p className="mt-3 text-[11px] leading-5 text-muted-foreground">测试会发送一条简短探针，使用所选订阅额度，不读取私人研究资料。</p>
         {busy && <p role="status" className="mt-3 text-sm text-primary">正在实测连接，请稍候…</p>}
         {error && <p role="alert" className="mt-3 rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-sm leading-6 text-destructive">{error} 可到其他接入方式查看登录与安装说明。</p>}

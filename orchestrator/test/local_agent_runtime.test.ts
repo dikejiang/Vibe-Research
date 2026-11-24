@@ -444,6 +444,75 @@ test("Claude 每次调用前都核对能力与订阅登录:API key / Bedrock / �
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
 
+test("Claude 网关模式(显式开启 VRA_CLAUDE_GATEWAY=1):不要求 claude.ai 订阅登录,但启动环境里必须有网关地址与凭据,卡片如实标成网关模式", async () => {
+  const f = fakeClaude();
+  try {
+    const gateway = { ...PLATFORM_ENV, CLAUDE_BIN: f.bin, PATH: "", VRA_CLAUDE_GATEWAY: "1", FAKE_AUTH_METHOD: "oauth_token",
+      ANTHROPIC_BASE_URL: "https://gateway.invalid/anthropic", ANTHROPIC_AUTH_TOKEN: "gateway-token-marker" };
+    const ready = await probeClaude(gateway);
+    assert.equal(ready.status, "ready");
+    assert.equal(ready.available, true);
+    assert.equal(ready.mode, "gateway");
+    assert.match(ready.detail, /网关/);
+    assert.ok(!JSON.stringify(ready).includes("gateway-token-marker") && !JSON.stringify(ready).includes("gateway.invalid"), "状态里不带凭据,也不带网关地址");
+    for (const [drop, hint] of [["ANTHROPIC_BASE_URL", /ANTHROPIC_BASE_URL/], ["ANTHROPIC_AUTH_TOKEN", /ANTHROPIC_AUTH_TOKEN/]] as const) {
+      const env: Record<string, string | undefined> = { ...gateway };
+      delete env[drop];
+      const missing = await probeClaude(env);
+      assert.equal(missing.status, "not_authenticated", drop);
+      assert.equal(missing.available, false);
+      assert.match(missing.detail, hint);
+    }
+    // 凭据也可以是 API key 形态:走哪个网关、怎么计费由使用者自己导出的配置决定,卡片只负责如实标注
+    const apiKey: Record<string, string | undefined> = { ...gateway, FAKE_AUTH_METHOD: undefined, ANTHROPIC_AUTH_TOKEN: undefined, ANTHROPIC_API_KEY: "gateway-key-marker" };
+    assert.equal((await probeClaude(apiKey)).status, "ready");
+    // 用 CLAUDE_CODE_OAUTH_TOKEN 接网关的配置同样算有凭据
+    const oauth: Record<string, string | undefined> = { ...gateway, FAKE_AUTH_METHOD: undefined, ANTHROPIC_AUTH_TOKEN: undefined, CLAUDE_CODE_OAUTH_TOKEN: "gateway-oauth-marker" };
+    assert.equal((await probeClaude(oauth)).status, "ready");
+    // 旧版 CLI 缺安全参数时,网关模式同样不点亮
+    assert.equal((await probeClaude({ ...gateway, FAKE_OLD_HELP: "1" })).status, "probe_failed");
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("没开 VRA_CLAUDE_GATEWAY 时订阅卡片的规矩不变:网关登录方式(oauth_token)照样不点亮,也不标网关模式", async () => {
+  const f = fakeClaude();
+  try {
+    const status = await probeClaude({ ...PLATFORM_ENV, CLAUDE_BIN: f.bin, PATH: "", FAKE_AUTH_METHOD: "oauth_token",
+      ANTHROPIC_BASE_URL: "https://gateway.invalid/anthropic", ANTHROPIC_AUTH_TOKEN: "gateway-token-marker" });
+    assert.equal(status.status, "not_authenticated");
+    assert.equal(status.available, false);
+    assert.equal(status.mode, undefined);
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("Claude 网关模式调用:ANTHROPIC_* 与 API 超时原样交给 CLI,其它服务的密钥与 Node 注入参数仍不透传", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vra-claude-gateway-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const bin = fakeNodeExecutable(dir, "claude", `process.stdin.resume();process.stdin.on('end',()=>console.log(JSON.stringify({result:JSON.stringify({
+    base:process.env.ANTHROPIC_BASE_URL??null,auth:process.env.ANTHROPIC_AUTH_TOKEN??null,model:process.env.ANTHROPIC_MODEL??null,timeout:process.env.API_TIMEOUT_MS??null,
+    leak:process.env.OPENAI_API_KEY??null,nodeOptions:process.env.NODE_OPTIONS??null,bedrock:process.env.CLAUDE_CODE_USE_BEDROCK??null})})));`);
+  const seen = JSON.parse(await runLocalAgent("claude", { systemPrompt: "规则", userPrompt: "测试", env: { ...PLATFORM_ENV, PATH: process.env.PATH, CLAUDE_BIN: bin,
+    VRA_CLAUDE_GATEWAY: "1", ANTHROPIC_BASE_URL: "https://gateway.invalid/anthropic", ANTHROPIC_AUTH_TOKEN: "gateway-token-marker",
+    ANTHROPIC_MODEL: "glm-x", API_TIMEOUT_MS: "300000", OPENAI_API_KEY: "unrelated-openai-marker", NODE_OPTIONS: "--trace-warnings" } }));
+  assert.deepEqual(seen, { base: "https://gateway.invalid/anthropic", auth: "gateway-token-marker", model: "glm-x", timeout: "300000",
+    leak: null, nodeOptions: null, bedrock: null });
+});
+
+test("Claude 网关模式执行前不再查订阅登录:未登录、登录检测失败也照常启动;缺网关变量或 CLI 过旧时仍明确拒绝,错误里不带凭据", async () => {
+  const f = fakeClaude();
+  try {
+    const call = (extra: Record<string, string | undefined>) => runLocalAgent("claude", { systemPrompt: "规则", userPrompt: "测试", env: {
+      ...PLATFORM_ENV, CLAUDE_BIN: f.bin, PATH: process.env.PATH, VRA_CLAUDE_GATEWAY: "1",
+      ANTHROPIC_BASE_URL: "https://gateway.invalid/anthropic", ANTHROPIC_AUTH_TOKEN: "gateway-token-marker", ...extra } });
+    for (const extra of [{ FAKE_AUTH_METHOD: "oauth_token" }, { FAKE_AUTH_LOGGED_OUT: "1" }, { FAKE_AUTH_FAILURE: "1" }]) {
+      assert.equal(await call(extra), "测试|keys=false|oauth=false", JSON.stringify(extra));
+    }
+    await assert.rejects(call({ FAKE_OLD_HELP: "1" }), (e: unknown) => e instanceof LocalAgentError && e.code === "agent_cli_too_old");
+    await assert.rejects(call({ ANTHROPIC_AUTH_TOKEN: undefined, ANTHROPIC_API_KEY: undefined }),
+      (e: unknown) => e instanceof LocalAgentError && e.code === "agent_not_authenticated" && /ANTHROPIC_AUTH_TOKEN/.test(e.message) && !/gateway-token-marker/.test(e.message));
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
 test("探针进行中取消:不再启动研究进程,如实报取消(Claude / Codex 探针随取消停下,CodeBuddy 等探针结束后不再启动)", { skip: process.platform === "win32" }, async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vra-probe-cancel-"));
   // 盯住真正的研究进程:spawn 参数里带着本次系统提示词的就是它(探针进程不带)。

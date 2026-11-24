@@ -59,6 +59,9 @@
 2. 回到「接入 AI」,在 Claude 卡片点「测试并保存」。不需要把 Claude 的 key 填进产品。
 
 - 每次调用前都会重新确认 Claude Code 带着受限运行所需的参数、当前是 claude.ai 订阅登录;中途换成 API key / Bedrock / Vertex 登录时直接报错,不会按 API 计费跑下去。
+- 网关模式（要部署者显式开启）：启动服务前设 `VRA_CLAUDE_GATEWAY=1`，并在同一个环境里导出 Claude Code 自己的网关配置 —— `ANTHROPIC_BASE_URL` 加 `ANTHROPIC_AUTH_TOKEN`（或 `ANTHROPIC_API_KEY`）；其余 `ANTHROPIC_*`（模型名等）和 `API_TIMEOUT_MS` 一并生效。
+  这张卡不再要求 claude.ai 订阅登录，页面标成「网关模式」。产品不读 `~/.claude` 下的配置文件，只把启动环境里已有的这些变量原样转交给 `claude`（研究走工具路径时不读用户配置，必须显式带）。
+  走哪个网关、怎么计费由你导出的配置决定；没导出时卡片说明缺哪个变量、不点亮。去掉 `VRA_CLAUDE_GATEWAY` 即回到只认订阅登录。
 
 ### WorkBuddy / CodeBuddy
 

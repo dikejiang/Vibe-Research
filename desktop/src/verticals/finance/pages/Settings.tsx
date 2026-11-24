@@ -5,7 +5,7 @@ import { useAiPage } from "../../../core/ai/pageContext";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { Disclaimer } from "@/components/ui/Disclaimer";
 import { backend, friendlyAgentError, type LocalAgentStatus, type ProductInfo } from "@/lib/backend";
-import { API_MODELS, PROVIDER_BASE, SUBSCRIPTION_MODELS, apiPresetForSaved, isCliProvider, modelNameForPreset, providerOfModel, type ProviderId } from "@/lib/ai-models";
+import { API_MODELS, CLAUDE_GATEWAY, PROVIDER_BASE, SUBSCRIPTION_MODELS, apiPresetForSaved, isCliProvider, isGatewayAgent, modelNameForPreset, providerOfModel, type ModelConfig, type ProviderId } from "@/lib/ai-models";
 import { clearLlm, loadUserLlm, saveLlm } from "@/lib/llm";
 import { LLM_KEY } from "@/lib/llmStore";
 import { testAndSaveAi } from "@/lib/aiConnection";
@@ -124,6 +124,41 @@ function ActionRow(
       {msg && <span className="text-xs text-primary">{msg}</span>}
       {msgErr && <span className="text-xs text-destructive">{msgErr}</span>}
     </div>
+  );
+}
+
+/**
+ * 订阅档的一张卡片（只展示，检测状态由父组件给）。单独成组件是为了能渲染出来测「拿到检测状态以后」用户看到的文字。
+ * Claude Code 网关模式下如实标注：走的是启动环境里的网关配置，不拿「订阅登录」冒充 claude.ai 订阅。
+ */
+export function SubscriptionAgentCard({ model, status, probeFailed, selected, onSelect }: {
+  model: ModelConfig; status: LocalAgentStatus | undefined; probeFailed: boolean; selected: boolean; onSelect: () => void;
+}) {
+  const disabled = !status?.available;
+  const gateway = isGatewayAgent(status);
+  const badge = status?.status === "ready" ? "可用"
+    : status?.status === "not_authenticated" ? (gateway ? "配置不全" : "未登录")
+      : status?.status === "not_installed" ? "未安装"
+        : status?.status === "probe_failed" || probeFailed ? "检测失败" : "检测中";
+  return (
+    <button disabled={disabled} onClick={onSelect}
+      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+        disabled ? "cursor-not-allowed border-border/50 opacity-55"
+          : selected ? "border-primary/50 bg-primary/10" : "border-border hover:bg-muted/40"}`}>
+      <Terminal className={`h-4 w-4 shrink-0 ${selected ? "text-primary" : "text-muted-foreground"}`} />
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 font-medium">
+          {model.name}
+          <span className={`rounded px-1 py-0.5 text-[9px] ${status?.available ? "bg-success/15 text-success" : "bg-muted/60 text-muted-foreground"}`}>{badge}</span>
+          {gateway && <span className="rounded px-1 py-0.5 text-[9px] bg-warning/15 text-warning">网关模式</span>}
+          {selected && <Check className="h-3.5 w-3.5 text-primary" />}
+        </div>
+        <div className="truncate text-[11px] text-muted-foreground">{gateway ? CLAUDE_GATEWAY.description : model.description}</div>
+        <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={status?.detail}>
+          {status?.version ?? status?.detail ?? "正在读取本机状态"}
+        </div>
+      </div>
+    </button>
   );
 }
 
@@ -289,7 +324,7 @@ export function Settings() {
   const localRuntimeName = selectedProvider === "cli-codebuddy" ? "WorkBuddy / CodeBuddy" : selectedProvider === "cli-codex" ? "Codex" : "Claude Code";
   const runtimeFeatures = localSubscriptionRuntime
     ? [
-        { icon: Terminal, title: "本地对话", text: `使用 ${localRuntimeName} 登录账号` },
+        { icon: Terminal, title: "本地对话", text: selectedProvider === "cli-claude" && isGatewayAgent(agentOf("cli-claude")) ? CLAUDE_GATEWAY.runtime : `使用 ${localRuntimeName} 登录账号` },
         { icon: Wrench, title: "受控工具", text: "六阶段只开放产品 MCP" },
         { icon: Database, title: "完整研究", text: "A 股、港股、美股六阶段流程" },
         { icon: ShieldCheck, title: "证据纪律", text: "产物经过校验与红线" },
@@ -381,36 +416,15 @@ export function Settings() {
             <p className="rounded-lg border border-warning/25 bg-warning/[0.05] px-3 py-2 text-xs leading-relaxed text-muted-foreground">
               三家都可运行对话、有界材料任务和六阶段个股研究；研究阶段只开放产品受控的数据工具（MCP）。
             </p>
+            {isGatewayAgent(agentOf("cli-claude")) && (
+              <p className="rounded-lg border border-warning/25 bg-warning/[0.05] px-3 py-2 text-xs leading-relaxed text-muted-foreground">{CLAUDE_GATEWAY.note}</p>
+            )}
             {agentErr && <p className="rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive">本机 Agent 状态检测失败：{agentErr}</p>}
             <div className="grid gap-2 sm:grid-cols-3">
-              {SUBSCRIPTION_MODELS.map((m) => {
-                const on = cliId === m.id;
-                const detected = agentOf(m.provider);
-                const disabled = !detected?.available;
-                const badge = detected?.status === "ready" ? "可用"
-                  : detected?.status === "not_authenticated" ? "未登录"
-                    : detected?.status === "not_installed" ? "未安装"
-                      : detected?.status === "probe_failed" || agentErr ? "检测失败" : "检测中";
-                return (
-                  <button key={m.id} disabled={disabled} onClick={() => { setCliId(m.id); setMsg(""); setMsgErr(""); }}
-                    className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                      disabled ? "cursor-not-allowed border-border/50 opacity-55"
-                        : on ? "border-primary/50 bg-primary/10" : "border-border hover:bg-muted/40"}`}>
-                    <Terminal className={`h-4 w-4 shrink-0 ${on ? "text-primary" : "text-muted-foreground"}`} />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 font-medium">
-                        {m.name}
-                        <span className={`rounded px-1 py-0.5 text-[9px] ${detected?.available ? "bg-success/15 text-success" : "bg-muted/60 text-muted-foreground"}`}>{badge}</span>
-                        {on && <Check className="h-3.5 w-3.5 text-primary" />}
-                      </div>
-                      <div className="truncate text-[11px] text-muted-foreground">{m.description}</div>
-                      <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={detected?.detail}>
-                        {detected?.version ?? detected?.detail ?? "正在读取本机状态"}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+              {SUBSCRIPTION_MODELS.map((m) => (
+                <SubscriptionAgentCard key={m.id} model={m} status={agentOf(m.provider)} probeFailed={Boolean(agentErr)} selected={cliId === m.id}
+                  onSelect={() => { setCliId(m.id); setMsg(""); setMsgErr(""); }} />
+              ))}
             </div>
             {(() => {
               const codex = agentOf("cli-codex");

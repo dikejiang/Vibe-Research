@@ -36,7 +36,7 @@ import { DEFAULT_CONSISTENCY, readSnapshot, snapshotKey, snapshotUsable, writeSn
 import { currentPlugin } from "./plugin.ts";
 import { ReportLibraryError, addReport, listReports as listStoredReports, removeReport, reportCitationErrors, reportCitations, reportContextAsync, reportFile, reportRecallPlan, reportText, type ReportRecord } from "./report_library.ts";
 import { GuidedToolError, guidedToolTurn as guidedToolTurnCore, type GuidedToolReply } from "./guided_tool.ts";
-import { LocalAgentError, localSubscriptionEnv, probeClaude, probeCodeBuddy, probeCodex, saveCodeBuddyLocation, type LocalAgentStatus } from "./local_agent_runtime.ts";
+import { LocalAgentError, claudeGatewayEnabled, claudeGatewayEnv, localSubscriptionEnv, probeClaude, probeCodeBuddy, probeCodex, saveCodeBuddyLocation, type LocalAgentStatus } from "./local_agent_runtime.ts";
 import { redact } from "./service_redact.ts";
 import { CredentialError, authEnvValue, savedCredential } from "./saved_credentials.ts";
 import { runMetrics, type RunMetrics } from "./run_compare.ts";
@@ -187,6 +187,8 @@ export function researchRuntimeEnv(ctx: Pick<ServiceContext, "repoRoot" | "dataR
       // 设置页保存的位置在数据根里,子进程启动时自己读(loadSavedAgentPaths)。
       const binKey = ({ claude: "CLAUDE_BIN", codebuddy: "CODEBUDDY_BIN", codex: "CODEX_BIN" } as const)[runtime.agent];
       if (String(baseEnv[binKey] ?? "").trim()) out[binKey] = String(baseEnv[binKey]);
+      // Claude 网关模式:研究子进程同样要拿到启动环境里的网关变量(研究走工具路径,不读用户配置;见 claudeGatewayEnv)
+      if (runtime.agent === "claude" && claudeGatewayEnabled(baseEnv)) Object.assign(out, claudeGatewayEnv(baseEnv));
     } else {
       const { envKey } = runtime.api;
       // key 只能落进它自己的变量:不许借模板改写基础环境或产品自己的 VRA_* 变量

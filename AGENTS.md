@@ -13,7 +13,7 @@
 
 | 大脑 | 接法 | 登录与凭据 |
 |------|------|------------|
-| Claude Code | 本机 `claude` CLI | 使用者本人在终端用 claude.ai 订阅登录(API key / Bedrock / Vertex 登录不算订阅);产品不读、不存、不复制登录文件 |
+| Claude Code | 本机 `claude` CLI | 使用者本人在终端用 claude.ai 订阅登录(API key / Bedrock / Vertex 登录不算订阅);产品不读、不存、不复制登录文件。部署者显式设 `VRA_CLAUDE_GATEWAY=1` 时为网关模式:转交启动环境里的 `ANTHROPIC_*`,界面如实标注 |
 | Codex | 本机 `codex` CLI | 使用者本人在终端 `codex login` 用 ChatGPT 账号登录(Codex 里配的 API key 登录不认);同上 |
 | WorkBuddy / CodeBuddy | 本机 `codebuddy` CLI(独立 CLI 或 WorkBuddy 桌面版内置) | 使用者本人在终端运行 `codebuddy` 登录独立 CLI(新版 WorkBuddy 桌面版的登录加密保存,产品借不到);同上 |
 | 模型 API | 任意 Chat Completions 兼容接口(模板见 `providers/`) | 页面里填的 key 只存在浏览器 `localStorage`,随请求交给本机服务,不落盘;命令行研究从模板声明的环境变量读 key |
@@ -133,6 +133,7 @@ Python 用安装时建的虚拟环境；mypy 的安装与约定见 [`docs/develo
 ### 6.2 模型接入与凭据
 
 - 本机 CLI 大脑一律用使用者自己的登录;产品不读取、复制、软链或转存任何 CLI 的认证文件,也不代填账号密码。
+  唯一的例外是部署者显式开启的 Claude Code 网关模式(`VRA_CLAUDE_GATEWAY=1`):把启动环境里已有的 `ANTHROPIC_*` 转交给 `claude`,不读配置文件;界面必须标成网关模式,不得冒充订阅。
 - 订阅与 API 配置都必须先完成真实对话测试,成功才保存;失败不得覆盖当前已生效配置。
 - 浏览器 API key 只保存在当前浏览器 `localStorage`,随请求交给本机后端;不得写入仓库、后端配置、运行账本、日志、文档或测试夹具。
 - provider 模板存在不等于已接通;接入探针通过也不等于所有业务已验收 —— 只有在实际业务页面跑通的通道才能在对应范围标为已验证。
